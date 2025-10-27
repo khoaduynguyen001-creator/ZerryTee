@@ -1,0 +1,14 @@
+# Build artifacts
+client/client
+client/keypair.bin
+client/build/
+*.o
+*.out
+
+# Go modules
+controller/go.sum
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/

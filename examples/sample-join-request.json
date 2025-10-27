@@ -1,0 +1,5 @@
+{
+  "node_id": "node-A",
+  "pubkey_b64": "BASE64_PUBKEY",
+  "udp_port": 40000
+}
