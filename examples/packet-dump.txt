@@ -1,2 +1,0 @@
-Raw packet dump example (hex):
-24 3f ... (nonce + ciphertext)

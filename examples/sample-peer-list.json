@@ -1,4 +1,0 @@
-[
-  {"node_id":"node-A","pubkey_b64":"AAA...","endpoint":"203.0.113.5:40000"},
-  {"node_id":"node-B","pubkey_b64":"BBB...","endpoint":"198.51.100.7:40001"}
-]
