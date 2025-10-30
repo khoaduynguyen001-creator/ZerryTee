@@ -349,7 +349,7 @@ void* controller_run(void *arg) {
                     peer_t *dst = network_find_peer(ctrl->network, header.dest_id);
                     if (dst) {
                         transport_send(ctrl->transport, &dst->addr, PKT_DATA,
-                                       ctrl->controller_id, dst->id, data, (uint16_t)data_len);
+                                       header.sender_id, dst->id, data, (uint16_t)data_len);
                     }
                     break; }
                 
