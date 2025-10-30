@@ -11,6 +11,10 @@
 #define SIGNATURE_SIZE 64
 #define NETWORK_ID_SIZE 16
 
+// Default overlay subnet (IPv4 /24)
+#define OVERLAY_BASE_IP "10.0.0.0"
+#define OVERLAY_NETMASK "255.255.255.0"
+
 // Key pair structure for Ed25519
 typedef struct {
     uint8_t public_key[KEYPAIR_SIZE];
@@ -24,6 +28,7 @@ typedef struct {
     keypair_t keys;
     time_t last_seen;
     bool is_active;
+    uint32_t virtual_ip; // network byte order
 } peer_t;
 
 // Network structure

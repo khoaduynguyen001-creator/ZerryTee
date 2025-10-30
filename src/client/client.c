@@ -9,6 +9,46 @@
 #include <errno.h>
 #include "../include/client.h"
 
+// --- Packet forwarding helpers ---
+static inline uint32_t extract_ipv4_dest(const uint8_t *packet, size_t len) {
+    // Minimal IPv4 validation: need at least 20 bytes, version 4
+    if (len < 20) return 0;
+    uint8_t version = (packet[0] >> 4) & 0x0F;
+    if (version != 4) return 0;
+    // Dest IP at bytes 16..19
+    uint32_t dest;
+    memcpy(&dest, packet + 16, sizeof(uint32_t));
+    return dest; // network byte order
+}
+
+static client_peer_t* find_peer_by_vip(client_t *client, uint32_t dest_ip_net) {
+    for (int i = 0; i < client->peer_count; i++) {
+        struct in_addr vip_addr;
+        if (inet_pton(AF_INET, client->peers[i].virtual_ip, &vip_addr) == 1) {
+            if (vip_addr.s_addr == dest_ip_net) {
+                return &client->peers[i];
+            }
+        }
+    }
+    return NULL;
+}
+
+static void forward_ip_packet_to_peer(client_t *client, const uint8_t *buf, int len) {
+    uint32_t dest_ip_net = extract_ipv4_dest(buf, (size_t)len);
+    if (dest_ip_net == 0) {
+        // Not IPv4 or invalid; ignore for now
+        return;
+    }
+    client_peer_t *peer = find_peer_by_vip(client, dest_ip_net);
+    if (!peer) {
+        // No mapping yet; could be ARP/ICMP or peer not discovered
+        return;
+    }
+    // Send the raw IP packet as payload
+    transport_send(client->transport, &peer->addr, PKT_DATA,
+                   client->client_id, peer->id, buf, (uint16_t)len);
+}
+
 // Create client
 client_t* client_create(const char *controller_ip, uint16_t controller_port) {
     if (!controller_ip) return NULL;
@@ -64,7 +104,8 @@ client_t* client_create(const char *controller_ip, uint16_t controller_port) {
     
     client->connected = false;
     client->running = false;
-    strncpy(client->virtual_ip, "10.0.0.1", sizeof(client->virtual_ip) - 1); // Default IP
+    client->virtual_ip[0] = '\0';
+    client->peer_count = 0;
     
     printf("Client created with ID: %llu\n", (unsigned long long)client->client_id);
     printf("Controller: %s:%d\n", controller_ip, controller_port);
@@ -219,9 +260,8 @@ void* client_run(void *arg) {
         if (client->tun && FD_ISSET(tun_get_fd(client->tun), &read_fds)) {
             int n = tun_read(client->tun, tun_buffer, sizeof(tun_buffer));
             if (n > 0) {
-                printf("Received %d bytes from TUN interface\n", n);
-                // TODO: Forward to peer via UDP (will be implemented in Step 4)
-                // For now, just log it
+                // Forward based on destination virtual IP (unicast)
+                forward_ip_packet_to_peer(client, tun_buffer, n);
             }
         }
         
@@ -242,17 +282,65 @@ void* client_run(void *arg) {
                         
                     case PKT_JOIN_RESPONSE:
                         printf("Received JOIN_RESPONSE - Successfully joined network!\n");
-                        // TODO: Parse assigned virtual IP from JOIN_RESPONSE
-                        // For now, configure TUN with default IP
-                        if (client->tun) {
-                            tun_configure(client->tun, client->virtual_ip, "255.255.255.0");
-                            tun_up(client->tun);
-                            printf("TUN interface configured with IP: %s\n", client->virtual_ip);
+                        // Payload contains 4-byte virtual IP (network byte order)
+                        if (data_len == 4) {
+                            uint32_t vip_net;
+                            memcpy(&vip_net, data, sizeof(uint32_t));
+                            struct in_addr vip; vip.s_addr = vip_net;
+                            inet_ntop(AF_INET, &vip, client->virtual_ip, sizeof(client->virtual_ip));
+                            printf("Assigned virtual IP: %s\n", client->virtual_ip);
+                            // Configure TUN with assigned IP
+                            if (client->tun) {
+                                tun_configure(client->tun, client->virtual_ip, OVERLAY_NETMASK);
+                                tun_up(client->tun);
+                                printf("TUN interface configured with IP: %s\n", client->virtual_ip);
+                            }
+                        }
+                        break;
+                        
+                    case PKT_PEER_INFO: {
+                        if (data_len == (int)(sizeof(uint64_t) + sizeof(uint32_t) + sizeof(struct sockaddr_in))) {
+                            uint64_t pid; uint32_t vip_net; struct sockaddr_in paddr;
+                            memcpy(&pid, data, sizeof(uint64_t));
+                            memcpy(&vip_net, data + sizeof(uint64_t), sizeof(uint32_t));
+                            memcpy(&paddr, data + sizeof(uint64_t) + sizeof(uint32_t), sizeof(struct sockaddr_in));
+
+                            char vip_str[16];
+                            struct in_addr vip; vip.s_addr = vip_net;
+                            inet_ntop(AF_INET, &vip, vip_str, sizeof(vip_str));
+
+                            // Add to local peer list if not exists
+                            bool exists = false;
+                            for (int i = 0; i < client->peer_count; i++) {
+                                if (client->peers[i].id == pid) { exists = true; break; }
+                            }
+                            if (!exists && client->peer_count < CLIENT_MAX_PEERS) {
+                                client_peer_t *cp = &client->peers[client->peer_count++];
+                                cp->id = pid; cp->addr = paddr; cp->reachable = false;
+                                strncpy(cp->virtual_ip, vip_str, sizeof(cp->virtual_ip) - 1);
+                                printf("Discovered peer %llu at %s:%d (vIP %s)\n",
+                                       (unsigned long long)pid,
+                                       inet_ntoa(paddr.sin_addr), ntohs(paddr.sin_port), vip_str);
+
+                                // Send direct hello to peer
+                                transport_send(client->transport, &cp->addr, PKT_PEER_HELLO,
+                                               client->client_id, cp->id, NULL, 0);
+                            }
+                        }
+                        break; }
+
+                    case PKT_PEER_HELLO:
+                        printf("Received direct PEER_HELLO from peer %llu\n", (unsigned long long)header.sender_id);
+                        // Mark peer as reachable
+                        for (int i = 0; i < client->peer_count; i++) {
+                            if (client->peers[i].id == header.sender_id) {
+                                client->peers[i].reachable = true;
+                                break;
+                            }
                         }
                         break;
                         
                     case PKT_KEEPALIVE:
-                        printf("Received KEEPALIVE from controller\n");
                         // Send keepalive back
                         transport_send_keepalive(client->transport, 
                                                &client->controller_addr,

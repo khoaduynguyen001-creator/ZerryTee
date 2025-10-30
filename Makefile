@@ -26,8 +26,9 @@ ALL_OBJ = $(CORE_OBJ) $(TRANSPORT_OBJ) $(TUN_OBJ) $(CONTROLLER_OBJ) $(CLIENT_OBJ
 # Executables
 CONTROLLER_BIN = $(BIN_DIR)/zerrytee-controller
 CLIENT_BIN = $(BIN_DIR)/zerrytee-client
+CLI_BIN = $(BIN_DIR)/zerrytee
 
-.PHONY: all clean dirs controller client help
+.PHONY: all clean dirs controller client cli help
 
 all: dirs controller client
 
@@ -55,6 +56,11 @@ client: dirs $(CORE_OBJ) $(TRANSPORT_OBJ) $(TUN_OBJ) $(CLIENT_OBJ)
 		src/client/main.c -o $(CLIENT_BIN) $(CFLAGS)
 	@echo "Built $(CLIENT_BIN)"
 
+# CLI executable
+cli: dirs $(TRANSPORT_OBJ)
+	$(CC) $(LDFLAGS) $(TRANSPORT_OBJ) src/cli/zerrytee.c -o $(CLI_BIN) $(CFLAGS)
+	@echo "Built $(CLI_BIN)"
+
 clean:
 	rm -rf $(BUILD_DIR) $(BIN_DIR)
 	@echo "Cleaned build artifacts"
@@ -66,9 +72,11 @@ help:
 	@echo "  all         - Build controller and client (default)"
 	@echo "  controller  - Build controller only"
 	@echo "  client      - Build client only"
+	@echo "  cli         - Build zerrytee CLI"
 	@echo "  clean       - Remove build artifacts"
 	@echo ""
 	@echo "Usage:"
 	@echo "  make controller  # Build controller"
 	@echo "  make client      # Build client"
+	@echo "  make cli         # Build zerrytee CLI"
 	@echo "  make             # Build everything"

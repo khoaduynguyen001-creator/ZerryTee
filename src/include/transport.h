@@ -16,7 +16,11 @@ typedef enum {
     PKT_KEEPALIVE = 0x04,
     PKT_BYE = 0x05,
     PKT_JOIN_REQUEST = 0x06,
-    PKT_JOIN_RESPONSE = 0x07
+    PKT_JOIN_RESPONSE = 0x07,
+    PKT_PEER_INFO = 0x08,     // controller -> clients (peer details)
+    PKT_PEER_HELLO = 0x09,    // client -> client (direct hello)
+    PKT_LIST_REQUEST = 0x0A,  // cli -> controller (ask for peers)
+    PKT_LIST_DONE = 0x0B      // controller -> cli (end of list)
 } packet_type_t;
 
 // Packet header

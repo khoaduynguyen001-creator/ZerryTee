@@ -14,7 +14,7 @@
 
 ## Priority 1: Core Networking Features (Must Have)
 
-### 1. **Virtual Network Interface (TUN/TAP)** ⭐ CRITICAL
+<!-- ### 1. **Virtual Network Interface (TUN/TAP)** ⭐ CRITICAL
 **Status:** Not implemented  
 **Why:** This is the foundation that makes ZeroTier transparent to applications.
 
@@ -38,9 +38,9 @@
 - `src/tun/tun.c`
 - `src/include/tun.h`
 
----
+--- -->
 
-### 2. **Peer-to-Peer Direct Communication** ⭐ CRITICAL
+<!-- ### 2. **Peer-to-Peer Direct Communication** ⭐ CRITICAL
 **Status:** Partially implemented (controller communication only)  
 **Why:** Clients must communicate directly with each other, not through controller.
 
@@ -62,7 +62,7 @@
 - `src/client/client.c` - Implement peer connections
 - `src/controller/controller.c` - Send peer list on JOIN
 
----
+--- -->
 
 ### 3. **Packet Forwarding Between TUN and Peers** ⭐ CRITICAL
 **Status:** Not implemented  

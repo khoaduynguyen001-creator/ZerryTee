@@ -8,6 +8,14 @@
 #include "tun.h"
 
 #define KEEPALIVE_INTERVAL 30
+#define CLIENT_MAX_PEERS 256
+
+typedef struct {
+    uint64_t id;
+    struct sockaddr_in addr;
+    char virtual_ip[16];
+    bool reachable;
+} client_peer_t;
 
 // Client structure
 typedef struct {
@@ -20,6 +28,8 @@ typedef struct {
     bool running;
     keypair_t keys;
     char virtual_ip[16];            // Assigned virtual IP (e.g., "10.0.0.1")
+    client_peer_t peers[CLIENT_MAX_PEERS];
+    int peer_count;
 } client_t;
 
 // Function declarations
