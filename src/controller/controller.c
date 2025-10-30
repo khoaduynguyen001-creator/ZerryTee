@@ -8,13 +8,26 @@
 #include <fcntl.h>
 #include "../include/controller.h"
 
-static uint32_t compute_virtual_ip_for_index(int index) {
-    // OVERLAY_BASE_IP + (index+2) to skip .0 and .1
-    struct in_addr base;
-    inet_aton(OVERLAY_BASE_IP, &base);
-    uint32_t host = ntohl(base.s_addr);
-    uint32_t ip = host + (uint32_t)(index + 2);
-    return htonl(ip);
+static uint32_t base_overlay_host(void) {
+    struct in_addr base; inet_aton(OVERLAY_BASE_IP, &base);
+    return ntohl(base.s_addr);
+}
+
+static int vip_in_use(controller_t *ctrl, uint32_t vip_net) {
+    for (int i = 0; i < ctrl->network->peer_count; i++) {
+        if (ctrl->network->peers[i].virtual_ip == vip_net) return 1;
+    }
+    return 0;
+}
+
+static uint32_t allocate_virtual_ip(controller_t *ctrl) {
+    // search 10.0.0.2 .. 10.0.0.254 for first free
+    uint32_t base = base_overlay_host();
+    for (int host = 2; host <= 254; host++) {
+        uint32_t candidate = htonl(base + (uint32_t)host);
+        if (!vip_in_use(ctrl, candidate)) return candidate;
+    }
+    return 0; // none available
 }
 
 // Create controller
@@ -115,8 +128,13 @@ int controller_approve_peer(controller_t *ctrl, uint64_t peer_id,
     peer_t *new_peer = peer_create(peer_id, addr);
     if (!new_peer) return -1;
 
-    // Assign a virtual IP address from the overlay subnet
-    uint32_t assigned_ip = compute_virtual_ip_for_index(ctrl->network->peer_count);
+    // Assign a unique virtual IP address from the overlay subnet
+    uint32_t assigned_ip = allocate_virtual_ip(ctrl);
+    if (assigned_ip == 0) {
+        fprintf(stderr, "No available virtual IPs in %s/24\n", OVERLAY_BASE_IP);
+        peer_destroy(new_peer);
+        return -1;
+    }
     new_peer->virtual_ip = assigned_ip;
     
     int result = network_add_peer(ctrl->network, new_peer);
@@ -214,15 +232,12 @@ void* controller_run(void *arg) {
                     controller_approve_peer(ctrl, header.sender_id, sender);
                     break;
                     
-                case PKT_KEEPALIVE:
-                    // Update peer's last seen
-                    {
-                        peer_t *peer = network_find_peer(ctrl->network, header.sender_id);
-                        if (peer) {
-                            peer_update_last_seen(peer);
-                        }
+                case PKT_KEEPALIVE: {
+                    peer_t *peer = network_find_peer(ctrl->network, header.sender_id);
+                    if (peer) {
+                        peer_update_last_seen(peer);
                     }
-                    break;
+                    break; }
                     
                 case PKT_BYE:
                     printf("Received BYE from peer %llu\n", (unsigned long long)header.sender_id);
@@ -230,7 +245,6 @@ void* controller_run(void *arg) {
                     break;
                     
                 case PKT_LIST_REQUEST: {
-                    // Send all peers to requester (sender)
                     for (int i = 0; i < ctrl->network->peer_count; i++) {
                         peer_t *p = &ctrl->network->peers[i];
                         uint8_t payload[sizeof(uint64_t) + sizeof(uint32_t) + sizeof(struct sockaddr_in)] = {0};
@@ -241,7 +255,6 @@ void* controller_run(void *arg) {
                                        ctrl->controller_id, header.sender_id,
                                        payload, sizeof(payload));
                     }
-                    // Indicate end of list
                     transport_send(ctrl->transport, &sender, PKT_LIST_DONE,
                                    ctrl->controller_id, header.sender_id, NULL, 0);
                     break; }
@@ -273,7 +286,7 @@ void* controller_run(void *arg) {
             last_check = now;
         }
         
-        usleep(100000); // 100ms
+        usleep(100000);
     }
     
     printf("Controller thread exiting\n");
