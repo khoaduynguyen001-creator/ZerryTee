@@ -51,14 +51,16 @@ int main(int argc, char *argv[]) {
             usleep(10000);
             continue;
         }
-        if (header.type == PKT_PEER_INFO && n == (int)(sizeof(uint64_t) + sizeof(uint32_t) + sizeof(struct sockaddr_in))) {
-            uint64_t pid; uint32_t vip_net; struct sockaddr_in paddr;
+        if (header.type == PKT_PEER_INFO && n == (int)(sizeof(uint64_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint16_t))) {
+            uint64_t pid; uint32_t vip_net; uint32_t ip_be; uint16_t port_be;
             memcpy(&pid, data, sizeof(uint64_t));
-            memcpy(&vip_net, data + sizeof(uint64_t), sizeof(uint32_t));
-            memcpy(&paddr, data + sizeof(uint64_t) + sizeof(uint32_t), sizeof(struct sockaddr_in));
+            memcpy(&vip_net, data + 8, sizeof(uint32_t));
+            memcpy(&ip_be, data + 12, sizeof(uint32_t));
+            memcpy(&port_be, data + 16, sizeof(uint16_t));
             char vip[16]; struct in_addr v; v.s_addr = vip_net; inet_ntop(AF_INET, &v, vip, sizeof(vip));
+            struct in_addr a; a.s_addr = ip_be;
             printf("- peer_id=%llu addr=%s:%d vIP=%s\n", (unsigned long long)pid,
-                   inet_ntoa(paddr.sin_addr), ntohs(paddr.sin_port), vip);
+                   inet_ntoa(a), ntohs(port_be), vip);
         } else if (header.type == PKT_LIST_DONE) {
             break;
         }

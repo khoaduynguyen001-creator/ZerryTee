@@ -333,15 +333,22 @@ void* client_run(void *arg) {
                         break;
                         
                     case PKT_PEER_INFO: {
-                        if (data_len == (int)(sizeof(uint64_t) + sizeof(uint32_t) + sizeof(struct sockaddr_in))) {
-                            uint64_t pid; uint32_t vip_net; struct sockaddr_in paddr;
+                        if (data_len == (int)(sizeof(uint64_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint16_t))) {
+                            uint64_t pid; uint32_t vip_net; uint32_t ip_be; uint16_t port_be;
                             memcpy(&pid, data, sizeof(uint64_t));
-                            memcpy(&vip_net, data + sizeof(uint64_t), sizeof(uint32_t));
-                            memcpy(&paddr, data + sizeof(uint64_t) + sizeof(uint32_t), sizeof(struct sockaddr_in));
+                            memcpy(&vip_net, data + 8, sizeof(uint32_t));
+                            memcpy(&ip_be, data + 12, sizeof(uint32_t));
+                            memcpy(&port_be, data + 16, sizeof(uint16_t));
 
                             char vip_str[16];
                             struct in_addr vip; vip.s_addr = vip_net;
                             inet_ntop(AF_INET, &vip, vip_str, sizeof(vip_str));
+
+                            // Build socket address
+                            struct sockaddr_in paddr; memset(&paddr, 0, sizeof(paddr));
+                            paddr.sin_family = AF_INET;
+                            paddr.sin_addr.s_addr = ip_be;   // already BE
+                            paddr.sin_port = port_be;         // already BE
 
                             // Add to local peer list if not exists
                             bool exists = false;

@@ -147,20 +147,26 @@ int controller_approve_peer(controller_t *ctrl, uint64_t peer_id,
         // 1) Send existing peers to the new client
         for (int i = 0; i < ctrl->network->peer_count - 1; i++) {
             peer_t *p = &ctrl->network->peers[i];
-            uint8_t payload[sizeof(uint64_t) + sizeof(uint32_t) + sizeof(struct sockaddr_in)] = {0};
+            uint8_t payload[sizeof(uint64_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint16_t)] = {0};
+            uint32_t ip_be = p->addr.sin_addr.s_addr; // already BE
+            uint16_t port_be = p->addr.sin_port;      // already BE
             memcpy(payload, &p->id, sizeof(uint64_t));
-            memcpy(payload + sizeof(uint64_t), &p->virtual_ip, sizeof(uint32_t));
-            memcpy(payload + sizeof(uint64_t) + sizeof(uint32_t), &p->addr, sizeof(struct sockaddr_in));
+            memcpy(payload + 8, &p->virtual_ip, sizeof(uint32_t));
+            memcpy(payload + 12, &ip_be, sizeof(uint32_t));
+            memcpy(payload + 16, &port_be, sizeof(uint16_t));
             transport_send(ctrl->transport, &addr, PKT_PEER_INFO, ctrl->controller_id, peer_id, payload, sizeof(payload));
         }
 
         // 2) Broadcast the new peer to all existing clients
         for (int i = 0; i < ctrl->network->peer_count - 1; i++) {
             peer_t *p = &ctrl->network->peers[i];
-            uint8_t payload[sizeof(uint64_t) + sizeof(uint32_t) + sizeof(struct sockaddr_in)] = {0};
+            uint8_t payload[sizeof(uint64_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint16_t)] = {0};
+            uint32_t ip_be = addr.sin_addr.s_addr;
+            uint16_t port_be = addr.sin_port;
             memcpy(payload, &new_peer->id, sizeof(uint64_t));
-            memcpy(payload + sizeof(uint64_t), &new_peer->virtual_ip, sizeof(uint32_t));
-            memcpy(payload + sizeof(uint64_t) + sizeof(uint32_t), &addr, sizeof(struct sockaddr_in));
+            memcpy(payload + 8, &new_peer->virtual_ip, sizeof(uint32_t));
+            memcpy(payload + 12, &ip_be, sizeof(uint32_t));
+            memcpy(payload + 16, &port_be, sizeof(uint16_t));
             transport_send(ctrl->transport, &p->addr, PKT_PEER_INFO, ctrl->controller_id, p->id, payload, sizeof(payload));
         }
     }
@@ -247,10 +253,13 @@ void* controller_run(void *arg) {
                 case PKT_LIST_REQUEST: {
                     for (int i = 0; i < ctrl->network->peer_count; i++) {
                         peer_t *p = &ctrl->network->peers[i];
-                        uint8_t payload[sizeof(uint64_t) + sizeof(uint32_t) + sizeof(struct sockaddr_in)] = {0};
+                        uint8_t payload[sizeof(uint64_t) + sizeof(uint32_t) + sizeof(uint32_t) + sizeof(uint16_t)] = {0};
+                        uint32_t ip_be = p->addr.sin_addr.s_addr;
+                        uint16_t port_be = p->addr.sin_port;
                         memcpy(payload, &p->id, sizeof(uint64_t));
-                        memcpy(payload + sizeof(uint64_t), &p->virtual_ip, sizeof(uint32_t));
-                        memcpy(payload + sizeof(uint64_t) + sizeof(uint32_t), &p->addr, sizeof(struct sockaddr_in));
+                        memcpy(payload + 8, &p->virtual_ip, sizeof(uint32_t));
+                        memcpy(payload + 12, &ip_be, sizeof(uint32_t));
+                        memcpy(payload + 16, &port_be, sizeof(uint16_t));
                         transport_send(ctrl->transport, &sender, PKT_PEER_INFO,
                                        ctrl->controller_id, header.sender_id,
                                        payload, sizeof(payload));
