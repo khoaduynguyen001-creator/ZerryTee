@@ -8,6 +8,12 @@
 
 #define KEEPALIVE_INTERVAL 30
 #define PEER_TIMEOUT 90
+#define JOIN_REPLAY_CACHE 64
+
+typedef struct {
+    uint64_t client_id;
+    uint64_t nonce;
+} join_nonce_entry_t;
 
 // Controller structure
 typedef struct {
@@ -17,6 +23,8 @@ typedef struct {
     bool running;
     uint64_t controller_id;
     char network_password[128]; // optional
+    join_nonce_entry_t nonce_cache[JOIN_REPLAY_CACHE];
+    int nonce_cache_count;
 } controller_t;
 
 // Function declarations

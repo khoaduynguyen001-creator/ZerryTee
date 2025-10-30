@@ -21,8 +21,8 @@ static int vip_in_use(controller_t *ctrl, uint32_t vip_net) {
     return 0;
 }
 
+// search 10.0.0.2 .. 10.0.0.254 for first free
 static uint32_t allocate_virtual_ip(controller_t *ctrl) {
-    // search 10.0.0.2 .. 10.0.0.254 for first free
     uint32_t base = base_overlay_host();
     for (int host = 2; host <= 254; host++) {
         uint32_t candidate = htonl(base + (uint32_t)host);
@@ -50,6 +50,7 @@ controller_t* controller_create(const char *network_name, uint16_t port, const c
     } else {
         ctrl->network_password[0] = '\0';
     }
+    ctrl->nonce_cache_count = 0;
     
     // Create network
     ctrl->network = network_create(network_name, true);
@@ -218,6 +219,27 @@ void controller_list_peers(controller_t *ctrl) {
     printf("\n");
 }
 
+static int is_replay_and_record(controller_t *ctrl, uint64_t client_id, uint64_t nonce_val) {
+    // Check existing
+    for (int i = 0; i < ctrl->nonce_cache_count; i++) {
+        if (ctrl->nonce_cache[i].client_id == client_id && ctrl->nonce_cache[i].nonce == nonce_val) {
+            return 1; // replay
+        }
+    }
+    // Insert/overwrite (ring buffer behavior)
+    if (ctrl->nonce_cache_count < JOIN_REPLAY_CACHE) {
+        ctrl->nonce_cache[ctrl->nonce_cache_count].client_id = client_id;
+        ctrl->nonce_cache[ctrl->nonce_cache_count].nonce = nonce_val;
+        ctrl->nonce_cache_count++;
+    } else {
+        // Simple overwrite oldest
+        for (int i = 1; i < JOIN_REPLAY_CACHE; i++) ctrl->nonce_cache[i-1] = ctrl->nonce_cache[i];
+        ctrl->nonce_cache[JOIN_REPLAY_CACHE-1].client_id = client_id;
+        ctrl->nonce_cache[JOIN_REPLAY_CACHE-1].nonce = nonce_val;
+    }
+    return 0;
+}
+
 // Controller main loop
 void* controller_run(void *arg) {
     controller_t *ctrl = (controller_t*)arg;
@@ -259,21 +281,29 @@ void* controller_run(void *arg) {
                             // Expect payload: netid(16) + client_id(8) + nonce(8) + hmac(32)
                             if (data_len != NETWORK_ID_SIZE + 8 + 8 + 32) ok = 0;
                             else {
-                                const uint8_t *client_id_be = data + NETWORK_ID_SIZE;
-                                const uint8_t *nonce = data + NETWORK_ID_SIZE + 8;
+                                uint64_t client_id_payload = 0, nonce_val = 0;
+                                memcpy(&client_id_payload, data + NETWORK_ID_SIZE, 8);
+                                memcpy(&nonce_val, data + NETWORK_ID_SIZE + 8, 8);
                                 const uint8_t *mac = data + NETWORK_ID_SIZE + 16;
-                                uint8_t msg[NETWORK_ID_SIZE + 8 + 8];
-                                memcpy(msg, data, NETWORK_ID_SIZE + 8 + 8);
-                                uint8_t calc[32];
-                                if (hmac_sha256((const uint8_t*)ctrl->network_password,
-                                                strlen(ctrl->network_password),
-                                                msg, sizeof(msg), calc) != 0) ok = 0;
-                                else if (memcmp(calc, mac, 32) != 0) ok = 0;
+                                // Identity binding
+                                if (client_id_payload != header.sender_id) ok = 0;
+                                // Replay protection
+                                if (ok && is_replay_and_record(ctrl, client_id_payload, nonce_val)) ok = 0;
+                                // HMAC check
+                                if (ok) {
+                                    uint8_t msg[NETWORK_ID_SIZE + 8 + 8];
+                                    memcpy(msg, data, sizeof(msg));
+                                    uint8_t calc[32];
+                                    if (hmac_sha256((const uint8_t*)ctrl->network_password,
+                                                    strlen(ctrl->network_password),
+                                                    msg, sizeof(msg), calc) != 0) ok = 0;
+                                    else if (memcmp(calc, mac, 32) != 0) ok = 0;
+                                }
                             }
                         }
                         if (ok) controller_approve_peer(ctrl, header.sender_id, sender);
                         else {
-                            printf("JOIN denied: password/HMAC invalid for peer %llu\n", (unsigned long long)header.sender_id);
+                            printf("JOIN denied: auth failed for peer %llu\n", (unsigned long long)header.sender_id);
                             transport_send(ctrl->transport, &sender, PKT_JOIN_RESPONSE,
                                            ctrl->controller_id, header.sender_id, NULL, 0);
                         }
