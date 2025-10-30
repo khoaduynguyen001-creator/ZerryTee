@@ -47,8 +47,6 @@ static void forward_ip_packet_to_peer(client_t *client, const uint8_t *buf, int 
     char dest_ip_str[INET_ADDRSTRLEN];
     struct in_addr d; d.s_addr = dest_ip_net;
     inet_ntop(AF_INET, &d, dest_ip_str, sizeof(dest_ip_str));
-    printf("forward: vIP=%s -> %s:%d len=%d\n", dest_ip_str,
-           inet_ntoa(peer->addr.sin_addr), ntohs(peer->addr.sin_port), len);
 
     // Derive session key from ids
     uint8_t key[AEAD_KEY_SIZE];
@@ -65,8 +63,18 @@ static void forward_ip_packet_to_peer(client_t *client, const uint8_t *buf, int 
         return;
     }
     size_t payload_len = AEAD_NONCE_SIZE + c_len;
-    transport_send(client->transport, &peer->addr, PKT_DATA,
-                   client->client_id, peer->id, cipherbuf, (uint16_t)payload_len);
+
+    if (peer->reachable) {
+        printf("forward: vIP=%s -> %s:%d len=%d (direct)\n", dest_ip_str,
+               inet_ntoa(peer->addr.sin_addr), ntohs(peer->addr.sin_port), len);
+        transport_send(client->transport, &peer->addr, PKT_DATA,
+                       client->client_id, peer->id, cipherbuf, (uint16_t)payload_len);
+    } else {
+        // Relay via controller as fallback
+        printf("forward: vIP=%s -> controller relay len=%d\n", dest_ip_str, len);
+        transport_send(client->transport, &client->controller_addr, PKT_DATA,
+                       client->client_id, peer->id, cipherbuf, (uint16_t)payload_len);
+    }
 }
 
 static void install_overlay_route(tun_t *tun) {
@@ -100,7 +108,7 @@ static void install_overlay_route(tun_t *tun) {
 }
 
 // Create client
-client_t* client_create(const char *controller_ip, uint16_t controller_port) {
+client_t* client_create(const char *controller_ip, uint16_t controller_port, const uint8_t *network_id) {
     if (!controller_ip) return NULL;
     
     client_t *client = (client_t*)calloc(1, sizeof(client_t));
@@ -116,6 +124,12 @@ client_t* client_create(const char *controller_ip, uint16_t controller_port) {
     if (keypair_generate(&client->keys) != 0) {
         free(client);
         return NULL;
+    }
+    
+    if (network_id) {
+        memcpy(client->target_network_id, network_id, NETWORK_ID_SIZE);
+    } else {
+        memset(client->target_network_id, 0, NETWORK_ID_SIZE);
     }
     
     // Create TUN interface
@@ -204,16 +218,15 @@ int client_connect(client_t *client) {
         return -1;
     }
     
-    // Send JOIN_REQUEST
+    // Send JOIN_REQUEST with network ID
     printf("Sending JOIN_REQUEST to controller...\n");
     if (transport_send(client->transport, &client->controller_addr,
-                      PKT_JOIN_REQUEST, client->client_id, 0, NULL, 0) != 0) {
+                      PKT_JOIN_REQUEST, client->client_id, 0,
+                      client->target_network_id, NETWORK_ID_SIZE) != 0) {
         return -1;
     }
     
-    client->connected = true;
-    printf("Connected to controller\n");
-    
+    printf("JOIN request sent, awaiting approval...\n");
     return 0;
 }
 
@@ -331,9 +344,8 @@ void* client_run(void *arg) {
                         break;
                         
                     case PKT_JOIN_RESPONSE:
-                        printf("Received JOIN_RESPONSE - Successfully joined network!\n");
-                        // Payload contains 4-byte virtual IP (network byte order)
                         if (data_len == 4) {
+                            printf("Received JOIN_RESPONSE - Successfully joined network!\n");
                             uint32_t vip_net;
                             memcpy(&vip_net, data, sizeof(uint32_t));
                             struct in_addr vip; vip.s_addr = vip_net;
@@ -347,6 +359,11 @@ void* client_run(void *arg) {
                                 // Install overlay route automatically
                                 install_overlay_route(client->tun);
                             }
+                            client->connected = true;
+                        } else {
+                            fprintf(stderr, "JOIN denied by controller (network ID mismatch or policy).\n");
+                            // Stop client loop gracefully
+                            client->running = false;
                         }
                         break;
                         
@@ -439,6 +456,17 @@ void* client_run(void *arg) {
             transport_send_keepalive(client->transport, &client->controller_addr,
                                     client->client_id, 0);
             last_keepalive = now;
+        }
+
+        // Probe peers for NAT hole punching until reachable
+        for (int i = 0; i < client->peer_count; i++) {
+            client_peer_t *p = &client->peers[i];
+            if (p->reachable) continue;
+            if (p->last_probe == 0 || now - p->last_probe >= 1) { // every ~1s
+                transport_send(client->transport, &p->addr, PKT_PEER_HELLO,
+                               client->client_id, p->id, NULL, 0);
+                p->last_probe = now;
+            }
         }
     }
     

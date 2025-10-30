@@ -225,6 +225,11 @@ void* controller_run(void *arg) {
         int data_len = transport_receive(ctrl->transport, &header, data, &sender);
         
         if (data_len >= 0) {
+            // Update sender's observed address if known
+            peer_t *sender_peer = network_find_peer(ctrl->network, header.sender_id);
+            if (sender_peer) {
+                sender_peer->addr = sender; // update public endpoint
+            }
             // Handle packet based on type
             switch (header.type) {
                 case PKT_HELLO:
@@ -232,24 +237,30 @@ void* controller_run(void *arg) {
                     transport_send(ctrl->transport, &sender, PKT_HELLO_ACK,
                                  ctrl->controller_id, header.sender_id, NULL, 0);
                     break;
-                    
+                
                 case PKT_JOIN_REQUEST:
                     printf("Received JOIN_REQUEST from peer %llu\n", (unsigned long long)header.sender_id);
-                    controller_approve_peer(ctrl, header.sender_id, sender);
+                    if (data_len == NETWORK_ID_SIZE && memcmp(data, ctrl->network->network_id, NETWORK_ID_SIZE) == 0) {
+                        controller_approve_peer(ctrl, header.sender_id, sender);
+                    } else {
+                        printf("JOIN denied: network ID mismatch from peer %llu\n", (unsigned long long)header.sender_id);
+                        transport_send(ctrl->transport, &sender, PKT_JOIN_RESPONSE,
+                                       ctrl->controller_id, header.sender_id, NULL, 0);
+                    }
                     break;
-                    
+                
                 case PKT_KEEPALIVE: {
                     peer_t *peer = network_find_peer(ctrl->network, header.sender_id);
                     if (peer) {
                         peer_update_last_seen(peer);
                     }
                     break; }
-                    
+                
                 case PKT_BYE:
                     printf("Received BYE from peer %llu\n", (unsigned long long)header.sender_id);
                     network_remove_peer(ctrl->network, header.sender_id);
                     break;
-                    
+                
                 case PKT_LIST_REQUEST: {
                     for (int i = 0; i < ctrl->network->peer_count; i++) {
                         peer_t *p = &ctrl->network->peers[i];
@@ -267,7 +278,16 @@ void* controller_run(void *arg) {
                     transport_send(ctrl->transport, &sender, PKT_LIST_DONE,
                                    ctrl->controller_id, header.sender_id, NULL, 0);
                     break; }
-                    
+                
+                case PKT_DATA: {
+                    // Relay DATA to destination peer if direct failed
+                    peer_t *dst = network_find_peer(ctrl->network, header.dest_id);
+                    if (dst) {
+                        transport_send(ctrl->transport, &dst->addr, PKT_DATA,
+                                       ctrl->controller_id, dst->id, data, (uint16_t)data_len);
+                    }
+                    break; }
+                
                 default:
                     printf("Unknown packet type: %d\n", header.type);
                     break;

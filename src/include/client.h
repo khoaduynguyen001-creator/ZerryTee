@@ -15,6 +15,7 @@ typedef struct {
     struct sockaddr_in addr;
     char virtual_ip[16];
     bool reachable;
+    time_t last_probe; // last time we sent a probe to this peer
 } client_peer_t;
 
 // Client structure
@@ -30,10 +31,11 @@ typedef struct {
     char virtual_ip[16];            // Assigned virtual IP (e.g., "10.0.0.1")
     client_peer_t peers[CLIENT_MAX_PEERS];
     int peer_count;
+    uint8_t target_network_id[NETWORK_ID_SIZE];
 } client_t;
 
 // Function declarations
-client_t* client_create(const char *controller_ip, uint16_t controller_port);
+client_t* client_create(const char *controller_ip, uint16_t controller_port, const uint8_t *network_id);
 void client_destroy(client_t *client);
 int client_connect(client_t *client);
 int client_disconnect(client_t *client);
