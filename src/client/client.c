@@ -49,6 +49,36 @@ static void forward_ip_packet_to_peer(client_t *client, const uint8_t *buf, int 
                    client->client_id, peer->id, buf, (uint16_t)len);
 }
 
+static void install_overlay_route(tun_t *tun) {
+    if (!tun) return;
+    const char *ifname = tun_get_name(tun);
+    if (!ifname || !*ifname) return;
+
+#ifdef __APPLE__
+    // macOS: route add -net 10.0.0.0/24 via interface
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd), "route -n add -net 10.0.0.0/24 -interface %s", ifname);
+    int rc = system(cmd);
+    if (rc != 0) {
+        fprintf(stderr, "Warning: failed to add route via %s; you may need sudo: %s\n", ifname, cmd);
+    } else {
+        printf("Installed overlay route 10.0.0.0/24 via %s\n", ifname);
+    }
+#elif __linux__
+    // Linux: ip route add 10.0.0.0/24 dev <ifname>
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd), "ip route add 10.0.0.0/24 dev %s", ifname);
+    int rc = system(cmd);
+    if (rc != 0) {
+        fprintf(stderr, "Warning: failed to add route via %s; you may need sudo: %s\n", ifname, cmd);
+    } else {
+        printf("Installed overlay route 10.0.0.0/24 via %s\n", ifname);
+    }
+#else
+    (void)ifname;
+#endif
+}
+
 // Create client
 client_t* client_create(const char *controller_ip, uint16_t controller_port) {
     if (!controller_ip) return NULL;
@@ -294,6 +324,8 @@ void* client_run(void *arg) {
                                 tun_configure(client->tun, client->virtual_ip, OVERLAY_NETMASK);
                                 tun_up(client->tun);
                                 printf("TUN interface configured with IP: %s\n", client->virtual_ip);
+                                // Install overlay route automatically
+                                install_overlay_route(client->tun);
                             }
                         }
                         break;
