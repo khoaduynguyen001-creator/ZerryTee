@@ -8,6 +8,8 @@
 #include <sys/select.h>
 #include <errno.h>
 #include "../include/client.h"
+#include "../include/crypto.h"
+#include <openssl/rand.h>
 
 // --- Packet forwarding helpers ---
 static inline uint32_t extract_ipv4_dest(const uint8_t *packet, size_t len) {
@@ -47,8 +49,24 @@ static void forward_ip_packet_to_peer(client_t *client, const uint8_t *buf, int 
     inet_ntop(AF_INET, &d, dest_ip_str, sizeof(dest_ip_str));
     printf("forward: vIP=%s -> %s:%d len=%d\n", dest_ip_str,
            inet_ntoa(peer->addr.sin_addr), ntohs(peer->addr.sin_port), len);
+
+    // Derive session key from ids
+    uint8_t key[AEAD_KEY_SIZE];
+    derive_session_key(client->client_id, peer->id, key);
+    // Build payload: nonce(12) || ciphertext+tag
+    uint8_t nonce[AEAD_NONCE_SIZE];
+    RAND_bytes(nonce, AEAD_NONCE_SIZE);
+    uint8_t cipherbuf[AEAD_NONCE_SIZE + (size_t)len + AEAD_TAG_SIZE];
+    memcpy(cipherbuf, nonce, AEAD_NONCE_SIZE);
+    size_t c_len = 0;
+    if (aead_encrypt_chacha20poly1305(key, nonce, buf, (size_t)len,
+                                       cipherbuf + AEAD_NONCE_SIZE, &c_len) != 0) {
+        fprintf(stderr, "encryption failed, dropping packet\n");
+        return;
+    }
+    size_t payload_len = AEAD_NONCE_SIZE + c_len;
     transport_send(client->transport, &peer->addr, PKT_DATA,
-                   client->client_id, peer->id, buf, (uint16_t)len);
+                   client->client_id, peer->id, cipherbuf, (uint16_t)payload_len);
 }
 
 static void install_overlay_route(tun_t *tun) {
@@ -388,13 +406,26 @@ void* client_run(void *arg) {
                                                client->client_id, header.sender_id);
                         break;
                         
-                    case PKT_DATA:
-                        printf("recv: PKT_DATA from %llu len=%d, writing to TUN\n",
+                    case PKT_DATA: {
+                        printf("recv: PKT_DATA from %llu len=%d, decrypting\n",
                                (unsigned long long)header.sender_id, data_len);
-                        if (client->tun && data_len > 0) {
-                            tun_write(client->tun, data, data_len);
+                        if (data_len > AEAD_NONCE_SIZE) {
+                            const uint8_t *nonce = data;
+                            const uint8_t *ct = data + AEAD_NONCE_SIZE;
+                            size_t ct_len = (size_t)(data_len - AEAD_NONCE_SIZE);
+                            uint8_t key[AEAD_KEY_SIZE];
+                            derive_session_key(client->client_id, header.sender_id, key);
+                            uint8_t plain[MAX_PACKET_SIZE]; size_t p_len = 0;
+                            if (aead_decrypt_chacha20poly1305(key, nonce, ct, ct_len, plain, &p_len) == 0) {
+                                if (client->tun && p_len > 0) {
+                                    tun_write(client->tun, plain, (int)p_len);
+                                    printf("recv: wrote %zu bytes to TUN\n", p_len);
+                                }
+                            } else {
+                                fprintf(stderr, "decryption failed\n");
+                            }
                         }
-                        break;
+                        break; }
                         
                     default:
                         printf("Unknown packet type: %d\n", header.type);

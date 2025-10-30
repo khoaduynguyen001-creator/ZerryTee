@@ -1,6 +1,6 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -g -Isrc/include -pthread
-LDFLAGS = -pthread
+LDFLAGS = -pthread -lcrypto
 
 # Directories
 SRC_DIR = src
@@ -8,7 +8,7 @@ BUILD_DIR = build
 BIN_DIR = bin
 
 # Source files
-CORE_SRC = $(SRC_DIR)/core/network.c $(SRC_DIR)/core/peer.c $(SRC_DIR)/core/keypair.c
+CORE_SRC = $(SRC_DIR)/core/network.c $(SRC_DIR)/core/peer.c $(SRC_DIR)/core/keypair.c $(SRC_DIR)/core/crypto.c
 TRANSPORT_SRC = $(SRC_DIR)/transport/transport.c
 TUN_SRC = $(SRC_DIR)/tun/tun.c
 CONTROLLER_SRC = $(SRC_DIR)/controller/controller.c
