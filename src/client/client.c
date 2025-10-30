@@ -36,15 +36,17 @@ static client_peer_t* find_peer_by_vip(client_t *client, uint32_t dest_ip_net) {
 static void forward_ip_packet_to_peer(client_t *client, const uint8_t *buf, int len) {
     uint32_t dest_ip_net = extract_ipv4_dest(buf, (size_t)len);
     if (dest_ip_net == 0) {
-        // Not IPv4 or invalid; ignore for now
         return;
     }
     client_peer_t *peer = find_peer_by_vip(client, dest_ip_net);
     if (!peer) {
-        // No mapping yet; could be ARP/ICMP or peer not discovered
         return;
     }
-    // Send the raw IP packet as payload
+    char dest_ip_str[INET_ADDRSTRLEN];
+    struct in_addr d; d.s_addr = dest_ip_net;
+    inet_ntop(AF_INET, &d, dest_ip_str, sizeof(dest_ip_str));
+    printf("forward: vIP=%s -> %s:%d len=%d\n", dest_ip_str,
+           inet_ntoa(peer->addr.sin_addr), ntohs(peer->addr.sin_port), len);
     transport_send(client->transport, &peer->addr, PKT_DATA,
                    client->client_id, peer->id, buf, (uint16_t)len);
 }
@@ -380,8 +382,8 @@ void* client_run(void *arg) {
                         break;
                         
                     case PKT_DATA:
-                        printf("Received DATA packet (%d bytes)\n", data_len);
-                        // TODO: Forward to TUN interface (will be implemented in Step 4)
+                        printf("recv: PKT_DATA from %llu len=%d, writing to TUN\n",
+                               (unsigned long long)header.sender_id, data_len);
                         if (client->tun && data_len > 0) {
                             tun_write(client->tun, data, data_len);
                         }

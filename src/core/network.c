@@ -18,10 +18,19 @@ network_t* network_create(const char *name, bool is_controller) {
     strncpy(net->name, name, MAX_NETWORK_NAME - 1);
     net->name[MAX_NETWORK_NAME - 1] = '\0';
     
-    // Generate network ID (simplified - hash of name + timestamp)
+    // Generate network ID (simplified - 16 raw bytes based on time and name)
     time_t now = time(NULL);
-    snprintf((char*)net->network_id, NETWORK_ID_SIZE, "%08lx%08x", 
-             (unsigned long)now, (unsigned int)strlen(name));
+    uint64_t t = (uint64_t)now;
+    uint64_t h = 0;
+    size_t nlen = strlen(name);
+    for (size_t i = 0; i < nlen; i++) {
+        h = (h * 131) ^ (uint8_t)name[i];
+    }
+    for (int i = 0; i < NETWORK_ID_SIZE; i++) {
+        uint8_t tb = (uint8_t)((t >> ((i % 8) * 8)) & 0xFF);
+        uint8_t hb = (uint8_t)((h >> (((i + 3) % 8) * 8)) & 0xFF);
+        net->network_id[i] = tb ^ hb;
+    }
     
     // Generate network keypair
     if (keypair_generate(&net->network_keys) != 0) {
@@ -63,7 +72,7 @@ int network_add_peer(network_t *net, peer_t *peer) {
     // Check if peer already exists
     for (int i = 0; i < net->peer_count; i++) {
         if (net->peers[i].id == peer->id) {
-            fprintf(stderr, "Peer %lu already exists\n", peer->id);
+            fprintf(stderr, "Peer %llu already exists\n", (unsigned long long)peer->id);
             return -1;
         }
     }
@@ -72,8 +81,8 @@ int network_add_peer(network_t *net, peer_t *peer) {
     memcpy(&net->peers[net->peer_count], peer, sizeof(peer_t));
     net->peer_count++;
     
-    printf("Peer %lu added to network '%s' (total: %d)\n", 
-           peer->id, net->name, net->peer_count);
+    printf("Peer %llu added to network '%s' (total: %d)\n", 
+           (unsigned long long)peer->id, net->name, net->peer_count);
     
     return 0;
 }
@@ -90,12 +99,12 @@ int network_remove_peer(network_t *net, uint64_t peer_id) {
             }
             net->peer_count--;
             
-            printf("Peer %lu removed from network '%s'\n", peer_id, net->name);
+            printf("Peer %llu removed from network '%s'\n", (unsigned long long)peer_id, net->name);
             return 0;
         }
     }
     
-    fprintf(stderr, "Peer %lu not found\n", peer_id);
+    fprintf(stderr, "Peer %llu not found\n", (unsigned long long)peer_id);
     return -1;
 }
 
