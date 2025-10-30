@@ -1,6 +1,14 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -g -Isrc/include -pthread
-LDFLAGS = -pthread -lcrypto
+
+# OpenSSL flags via pkg-config with fallback
+OPENSSL_CFLAGS := $(shell pkg-config --cflags openssl 2>/dev/null)
+OPENSSL_LIBS   := $(shell pkg-config --libs openssl 2>/dev/null)
+ifeq ($(OPENSSL_LIBS),)
+	OPENSSL_LIBS = -lcrypto
+endif
+
+CFLAGS = -Wall -Wextra -g -Isrc/include -pthread $(OPENSSL_CFLAGS)
+LDFLAGS = -pthread $(OPENSSL_LIBS)
 
 # Directories
 SRC_DIR = src
@@ -46,19 +54,19 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
 
 # Controller executable
 controller: dirs $(CORE_OBJ) $(TRANSPORT_OBJ) $(CONTROLLER_OBJ)
-	$(CC) $(LDFLAGS) $(CORE_OBJ) $(TRANSPORT_OBJ) $(CONTROLLER_OBJ) \
-		src/controller/main.c -o $(CONTROLLER_BIN) $(CFLAGS)
+	$(CC) $(CORE_OBJ) $(TRANSPORT_OBJ) $(CONTROLLER_OBJ) \
+		src/controller/main.c -o $(CONTROLLER_BIN) $(LDFLAGS) $(CFLAGS)
 	@echo "Built $(CONTROLLER_BIN)"
 
 # Client executable
 client: dirs $(CORE_OBJ) $(TRANSPORT_OBJ) $(TUN_OBJ) $(CLIENT_OBJ)
-	$(CC) $(LDFLAGS) $(CORE_OBJ) $(TRANSPORT_OBJ) $(TUN_OBJ) $(CLIENT_OBJ) \
-		src/client/main.c -o $(CLIENT_BIN) $(CFLAGS)
+	$(CC) $(CORE_OBJ) $(TRANSPORT_OBJ) $(TUN_OBJ) $(CLIENT_OBJ) \
+		src/client/main.c -o $(CLIENT_BIN) $(LDFLAGS) $(CFLAGS)
 	@echo "Built $(CLIENT_BIN)"
 
 # CLI executable
 cli: dirs $(TRANSPORT_OBJ)
-	$(CC) $(LDFLAGS) $(TRANSPORT_OBJ) src/cli/zerrytee.c -o $(CLI_BIN) $(CFLAGS)
+	$(CC) $(TRANSPORT_OBJ) src/cli/zerrytee.c -o $(CLI_BIN) $(LDFLAGS) $(CFLAGS)
 	@echo "Built $(CLI_BIN)"
 
 clean:
