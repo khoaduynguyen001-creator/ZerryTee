@@ -18,4 +18,8 @@ int aead_decrypt_chacha20poly1305(const uint8_t key[AEAD_KEY_SIZE],
                                   const uint8_t *ciphertext, size_t ciphertext_len,
                                   uint8_t *plaintext, size_t *plaintext_len);
 
+int hmac_sha256(const uint8_t *key, size_t key_len,
+                const uint8_t *data, size_t data_len,
+                uint8_t out_mac[32]);
+
 #endif

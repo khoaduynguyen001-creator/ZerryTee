@@ -16,10 +16,11 @@ typedef struct {
     pthread_t thread;
     bool running;
     uint64_t controller_id;
+    char network_password[128]; // optional
 } controller_t;
 
 // Function declarations
-controller_t* controller_create(const char *network_name, uint16_t port);
+controller_t* controller_create(const char *network_name, uint16_t port, const char *password);
 void controller_destroy(controller_t *ctrl);
 int controller_start(controller_t *ctrl);
 void controller_stop(controller_t *ctrl);

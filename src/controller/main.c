@@ -20,6 +20,7 @@ static void signal_handler(int sig) {
 int main(int argc, char *argv[]) {
     const char *network_name = "TestNetwork";
     uint16_t port = DEFAULT_PORT;
+    const char *password = NULL;
 
     if (argc >= 2) {
         network_name = argv[1];
@@ -27,19 +28,23 @@ int main(int argc, char *argv[]) {
     if (argc >= 3) {
         port = (uint16_t)atoi(argv[2]);
     }
+    if (argc >= 4) {
+        password = argv[3];
+    }
 
     printf("========================================\n");
-    printf("ZeroTier Clone Controller\n");
+    printf("ZerryTee Controller\n");
     printf("========================================\n");
     printf("Network: %s\n", network_name);
     printf("Port: %d\n", port);
+    printf("Password: %s\n", password ? "set" : "(none)");
     printf("========================================\n\n");
 
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
 
     printf("Creating controller...\n");
-    g_controller = controller_create(network_name, port);
+    g_controller = controller_create(network_name, port, password);
     if (!g_controller) {
         fprintf(stderr, "Failed to create controller\n");
         return 1;
@@ -54,7 +59,6 @@ int main(int argc, char *argv[]) {
 
     printf("\nController is running. Press Ctrl+C to stop.\n\n");
 
-    // Main loop - periodically list peers
     while (1) {
         sleep(5);
         controller_list_peers(g_controller);

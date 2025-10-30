@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <fcntl.h>
 #include "../include/controller.h"
+#include "../include/crypto.h"
 
 static uint32_t base_overlay_host(void) {
     struct in_addr base; inet_aton(OVERLAY_BASE_IP, &base);
@@ -31,7 +32,7 @@ static uint32_t allocate_virtual_ip(controller_t *ctrl) {
 }
 
 // Create controller
-controller_t* controller_create(const char *network_name, uint16_t port) {
+controller_t* controller_create(const char *network_name, uint16_t port, const char *password) {
     if (!network_name) return NULL;
     
     controller_t *ctrl = (controller_t*)calloc(1, sizeof(controller_t));
@@ -42,6 +43,13 @@ controller_t* controller_create(const char *network_name, uint16_t port) {
     
     // Generate controller ID
     ctrl->controller_id = (uint64_t)time(NULL);
+
+    if (password) {
+        strncpy(ctrl->network_password, password, sizeof(ctrl->network_password)-1);
+        ctrl->network_password[sizeof(ctrl->network_password)-1] = '\0';
+    } else {
+        ctrl->network_password[0] = '\0';
+    }
     
     // Create network
     ctrl->network = network_create(network_name, true);
@@ -65,6 +73,11 @@ controller_t* controller_create(const char *network_name, uint16_t port) {
     ctrl->running = false;
     
     printf("Controller created with ID: %llu\n", (unsigned long long)ctrl->controller_id);
+    if (ctrl->network_password[0]) {
+        printf("Network password: set\n");
+    } else {
+        printf("Network password: not set\n");
+    }
     return ctrl;
 }
 
@@ -240,8 +253,30 @@ void* controller_run(void *arg) {
                 
                 case PKT_JOIN_REQUEST:
                     printf("Received JOIN_REQUEST from peer %llu\n", (unsigned long long)header.sender_id);
-                    if (data_len == NETWORK_ID_SIZE && memcmp(data, ctrl->network->network_id, NETWORK_ID_SIZE) == 0) {
-                        controller_approve_peer(ctrl, header.sender_id, sender);
+                    if (data_len >= NETWORK_ID_SIZE && memcmp(data, ctrl->network->network_id, NETWORK_ID_SIZE) == 0) {
+                        int ok = 1;
+                        if (ctrl->network_password[0]) {
+                            // Expect payload: netid(16) + client_id(8) + nonce(8) + hmac(32)
+                            if (data_len != NETWORK_ID_SIZE + 8 + 8 + 32) ok = 0;
+                            else {
+                                const uint8_t *client_id_be = data + NETWORK_ID_SIZE;
+                                const uint8_t *nonce = data + NETWORK_ID_SIZE + 8;
+                                const uint8_t *mac = data + NETWORK_ID_SIZE + 16;
+                                uint8_t msg[NETWORK_ID_SIZE + 8 + 8];
+                                memcpy(msg, data, NETWORK_ID_SIZE + 8 + 8);
+                                uint8_t calc[32];
+                                if (hmac_sha256((const uint8_t*)ctrl->network_password,
+                                                strlen(ctrl->network_password),
+                                                msg, sizeof(msg), calc) != 0) ok = 0;
+                                else if (memcmp(calc, mac, 32) != 0) ok = 0;
+                            }
+                        }
+                        if (ok) controller_approve_peer(ctrl, header.sender_id, sender);
+                        else {
+                            printf("JOIN denied: password/HMAC invalid for peer %llu\n", (unsigned long long)header.sender_id);
+                            transport_send(ctrl->transport, &sender, PKT_JOIN_RESPONSE,
+                                           ctrl->controller_id, header.sender_id, NULL, 0);
+                        }
                     } else {
                         printf("JOIN denied: network ID mismatch from peer %llu\n", (unsigned long long)header.sender_id);
                         transport_send(ctrl->transport, &sender, PKT_JOIN_RESPONSE,

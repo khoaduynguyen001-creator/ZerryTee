@@ -40,6 +40,7 @@ int main(int argc, char *argv[]) {
     uint16_t controller_port = DEFAULT_PORT;
     uint8_t network_id[NETWORK_ID_SIZE] = {0};
     int have_netid = 0;
+    const char *password = NULL;
     
     // Parse command line arguments
     if (argc >= 2) {
@@ -56,6 +57,9 @@ int main(int argc, char *argv[]) {
             return 1;
         }
     }
+    if (argc >= 5) {
+        password = argv[4];
+    }
     
     printf("========================================\n");
     printf("ZeroTier Clone Client\n");
@@ -65,6 +69,9 @@ int main(int argc, char *argv[]) {
         printf("Network ID provided\n");
     } else {
         printf("No network ID provided (controller may reject JOIN)\n");
+    }
+    if (password) {
+        printf("Password provided\n");
     }
     printf("========================================\n\n");
     
@@ -78,8 +85,13 @@ int main(int argc, char *argv[]) {
     if (!g_client) {
         fprintf(stderr, "Failed to create client\n");
         fprintf(stderr, "Note: TUN interface requires root privileges\n");
-        fprintf(stderr, "Try running with: sudo %s %s %d <network_id_hex>\n", argv[0], controller_ip, controller_port);
+        fprintf(stderr, "Try running with: sudo %s %s %d <network_id_hex> [password]\n", argv[0], controller_ip, controller_port);
         return 1;
+    }
+    
+    // Store password in process env for JOIN use (simple pass-through for now)
+    if (password) {
+        setenv("ZTNET_PASSWORD", password, 1);
     }
     
     // Start client

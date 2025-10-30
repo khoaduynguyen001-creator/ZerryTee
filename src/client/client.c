@@ -218,15 +218,39 @@ int client_connect(client_t *client) {
         return -1;
     }
     
-    // Send JOIN_REQUEST with network ID
+    // Send JOIN_REQUEST with network ID (+ optional HMAC password)
     printf("Sending JOIN_REQUEST to controller...\n");
-    if (transport_send(client->transport, &client->controller_addr,
-                      PKT_JOIN_REQUEST, client->client_id, 0,
-                      client->target_network_id, NETWORK_ID_SIZE) != 0) {
-        return -1;
+    const char *pwd = getenv("ZTNET_PASSWORD");
+    if (pwd && pwd[0]) {
+        uint8_t nonce8[8]; RAND_bytes(nonce8, sizeof(nonce8));
+        uint8_t msg[NETWORK_ID_SIZE + 8 + 8];
+        memcpy(msg, client->target_network_id, NETWORK_ID_SIZE);
+        memcpy(msg + NETWORK_ID_SIZE, &client->client_id, 8);
+        memcpy(msg + NETWORK_ID_SIZE + 8, nonce8, 8);
+        uint8_t mac[32];
+        if (hmac_sha256((const uint8_t*)pwd, strlen(pwd), msg, sizeof(msg), mac) != 0) {
+            fprintf(stderr, "Failed to compute HMAC for JOIN\n");
+            return -1;
+        }
+        uint8_t payload[NETWORK_ID_SIZE + 8 + 8 + 32];
+        memcpy(payload, msg, sizeof(msg));
+        memcpy(payload + sizeof(msg), mac, 32);
+        if (transport_send(client->transport, &client->controller_addr,
+                          PKT_JOIN_REQUEST, client->client_id, 0,
+                          payload, sizeof(payload)) != 0) {
+            return -1;
+        }
+    } else {
+        if (transport_send(client->transport, &client->controller_addr,
+                          PKT_JOIN_REQUEST, client->client_id, 0,
+                          client->target_network_id, NETWORK_ID_SIZE) != 0) {
+            return -1;
+        }
     }
     
-    printf("JOIN request sent, awaiting approval...\n");
+    client->connected = true;
+    printf("Connected to controller\n");
+    
     return 0;
 }
 

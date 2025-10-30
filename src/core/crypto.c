@@ -4,6 +4,7 @@
 #include <openssl/evp.h>
 #include <openssl/rand.h>
 #include <openssl/sha.h>
+#include <openssl/hmac.h>
 #include "../include/crypto.h"
 
 int derive_session_key(uint64_t id_a, uint64_t id_b, uint8_t out_key[AEAD_KEY_SIZE]) {
@@ -69,4 +70,13 @@ int aead_decrypt_chacha20poly1305(const uint8_t key[AEAD_KEY_SIZE],
     } while (0);
     EVP_CIPHER_CTX_free(ctx);
     return ok ? 0 : -1;
+}
+
+int hmac_sha256(const uint8_t *key, size_t key_len,
+                const uint8_t *data, size_t data_len,
+                uint8_t out_mac[32]) {
+    unsigned int outlen = 0;
+    unsigned char *res = HMAC(EVP_sha256(), key, (int)key_len, data, data_len, out_mac, &outlen);
+    if (!res || outlen != 32) return -1;
+    return 0;
 }
